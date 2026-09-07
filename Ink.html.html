@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ink and Ordnance</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            user-select: none;
+        }
+        body {
+            background-color: #111;
+            color: #f0f0f0;
+            font-family: 'Courier New', Courier, monospace;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            overflow: hidden;
+        }
+        #game-container {
+            position: relative;
+            width: 960px;
+            height: 540px;
+            box-shadow: 0 0 30px rgba(255, 255, 255, 0.2);
+            border: 4px solid #333;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        /* Film Grain & Vignette Overlay */
+        .film-overlay {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            pointer-events: none;
+            background: radial-gradient(circle, transparent 60%, rgba(0,0,0,0.6) 100%);
+            box-shadow: inset 0 0 80px rgba(0,0,0,0.8);
+        }
+        /* Vintage UI Overlay */
+        #ui {
+            position: absolute;
+            top: 15px;
+            left: 20px;
+            right: 20px;
+            display: flex;
+            justify-content: space-between;
+            pointer-events: none;
+            font-weight: bold;
+            font-size: 18px;
+            text-shadow: 2px 2px #000;
+        }
+        .ui-box {
+            background: rgba(0, 0, 0, 0.7);
+            padding: 8px 15px;
+            border: 2px solid #aaa;
+            border-radius: 4px;
+        }
+        /* Dialogue Box */
+        #dialogue-box {
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 80%;
+            background: rgba(15, 15, 15, 0.9);
+            border: 3px double #fff;
+            padding: 15px;
+            border-radius: 6px;
+            display: none;
+            color: #fff;
+            font-size: 16px;
+            line-height: 1.4;
+        }
+        #dialogue-box .speaker {
+            color: #f3c642;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        /* Controls Legend */
+        #controls-hint {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas" width="960" height="540"></canvas>
+        <div class="film-overlay"></div>
+        
+        <div id="ui">
+            <div class="ui-box">INK: <span id="health">100</span>%</div>
+            <div class="ui-box">ORDNANCE PAGES: <span id="pages">0</span> / 5</div>
+        </div>
+
+        <div id="dialogue-box">
+            <div class="speaker" id="dialogue-speaker">Inkwell Gazette Editor</div>
+            <div id="dialogue-text">Extra! Extra! Ink and Ordnance blueprints have been scattered!</div>
+        </div>
+    </div>
+
+    <div id="controls-hint">
+        <strong>Controls:</strong> [A / D] or [Left/Right] Move | [W / Space] Jump (Double Jump supported) | [J / Shift] Ink Dash
+    </div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Load Background Image
+const bgImage = new Image();
+bgImage.src = 'Gemini_Generated_Image_wxf0evwxf0evwxf0.jpg';
+
+// Input Handling
+const keys = {};
+window.addEventListener('keydown', e => keys[e.code] = true);
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+// Game State
+const gameState = {
+    pagesCollected: 0,
+    totalPages: 5,
+    gameOver: false,
+    dialogueActive: true,
+    dialogueStep: 0
+};
+
+// Dialogue Script
+const dialogues = [
+    { speaker: "Editor Snoops", text: "Welcome to Ink and Ordnance! The smiling moon turned the press ink alive and scattered our secret schematics across the city!" },
+    { speaker: "Bendy Ollie", text: "Don't worry, Boss! I'll bounce across the rooftops and retrieve all five lost ordnance pages!" }
+];
+
+function showDialogue(index) {
+    if (index < dialogues.length) {
+        document.getElementById('dialogue-box').style.display = 'block';
+        document.getElementById('dialogue-speaker').innerText = dialogues[index].speaker;
+        document.getElementById('dialogue-text').innerText = dialogues[index].text;
+    } else {
+        document.getElementById('dialogue-box').style.display = 'none';
+        gameState.dialogueActive = false;
+    }
+}
+showDialogue(0);
+
+window.addEventListener('keydown', (e) => {
+    if (gameState.dialogueActive && (e.code === 'Space' || e.code === 'Enter')) {
+        gameState.dialogueStep++;
+        showDialogue(gameState.dialogueStep);
+    }
+});
+
+// Level Platforms
+const platforms = [
+    { x: 0, y: 470, w: 960, h: 70 },       // Main Ground / Cobblestone Street
+    { x: 60, y: 380, w: 140, h: 15 },     // Inkwell Gazette Awning
+    { x: 230, y: 340, w: 120, h: 15 },    // Sputtering Bulb Roof
+    { x: 420, y: 300, w: 150, h: 15 },    // Train Tracks / Elevated Rail
+    { x: 610, y: 360, w: 130, h: 15 },    // Theatre Marquee
+    { x: 800, y: 330, w: 120, h: 15 }     // Deli Awning
+];
+
+// Collectible Gazette Pages
+const collectibles = [
+    { x: 120, y: 340, collected: false },
+    { x: 280, y: 300, collected: false },
+    { x: 490, y: 260, collected: false },
+    { x: 660, y: 320, collected: false },
+    { x: 850, y: 290, collected: false }
+];
+
+// Player Object (Rubber-Hose Animated Character)
+class Player {
+    constructor() {
+        this.x = 80;
+        this.y = 400;
+        this.w = 32;
+        this.h = 48;
+        this.vx = 0;
+        this.vy = 0;
+        this.speed = 4;
+        this.jumpForce = -10.5;
+        this.gravity = 0.45;
+        this.grounded = false;
+        this.jumpsLeft = 2;
+        this.facing = 1; // 1 = right, -1 = left
+        this.animTimer = 0;
+        this.health = 100;
+        this.dashCooldown = 0;
+    }
+
+    update() {
+        if (gameState.dialogueActive) return;
+
+        // Horizontal Movement
+        if (keys['KeyA'] || keys['ArrowLeft']) {
+            this.vx = -this.speed;
+            this.facing = -1;
+        } else if (keys['KeyD'] || keys['ArrowRight']) {
+            this.vx = this.speed;
+            this.facing = 1;
+        } else {
+            this.vx *= 0.7; // Friction
+        }
+
+        // Jump Handling
+        if ((keys['KeyW'] || keys['Space'] || keys['ArrowUp'])) {
+            if (!this.jumpKeyPressed) {
+                if (this.jumpsLeft > 0) {
+                    this.vy = this.jumpForce;
+                    this.jumpsLeft--;
+                    this.grounded = false;
+                    createInkSplash(this.x + this.w/2, this.y + this.h);
+                }
+                this.jumpKeyPressed = true;
+            }
+        } else {
+            this.jumpKeyPressed = false;
+        }
+
+        // Dash Ability
+        if ((keys['KeyJ'] || keys['ShiftLeft']) && this.dashCooldown === 0) {
+            this.vx = this.facing * 12;
+            this.dashCooldown = 30;
+            createInkSplash(this.x + this.w/2, this.y + this.h/2);
+        }
+        if (this.dashCooldown > 0) this.dashCooldown--;
+
+        // Apply Gravity
+        this.vy += this.gravity;
+
+        // Apply Movement
+        this.x += this.vx;
+        this.y += this.vy;
+
+        // Screen Boundaries
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.w > canvas.width) this.x = canvas.width - this.w;
+
+        // Platform Collisions
+        this.grounded = false;
+        for (let plat of platforms) {
+            if (this.x + this.w > plat.x && this.x < plat.x + plat.w &&
+                this.y + this.h >= plat.y && this.y + this.h - this.vy <= plat.y + 10) {
+                this.y = plat.y - this.h;
+                this.vy = 0;
+                this.grounded = true;
+                this.jumpsLeft = 2;
+            }
+        }
+
+        this.animTimer += 0.15;
+    }
+
+    draw() {
+        ctx.save();
+        ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+        if (this.facing === -1) ctx.scale(-1, 1);
+
+        // Rubber Hose Bouncing Stretch Effect
+        let bounce = Math.sin(this.animTimer) * (Math.abs(this.vx) > 0.5 ? 4 : 1.5);
+        
+        // Head
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.ellipse(0, -12 + bounce/2, 14, 16, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Eyes
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(4, -16 + bounce/2, 4, 0, Math.PI * 2);
+        ctx.arc(-2, -16 + bounce/2, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.arc(5, -16 + bounce/2, 1.5, 0, Math.PI * 2);
+        ctx.arc(-1, -16 + bounce/2, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Pie-Cut notches
+        ctx.fillStyle = '#000';
+        ctx.fillRect(4, -18 + bounce/2, 2, 3);
+
+        // Smile
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(1, -10 + bounce/2, 7, 0.1, Math.PI - 0.1);
+        ctx.stroke();
+
+        // Hose Body & Limbs
+        ctx.strokeStyle = '#000';
+        ctx.lineWidth = 5;
+        ctx.lineCap = 'round';
+
+        let legFlex = Math.sin(this.animTimer * 2) * 8;
+        ctx.beginPath();
+        ctx.moveTo(-5, 0);
+        ctx.lineTo(-8 + legFlex, 16);
+        ctx.lineTo(-5, 24);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(5, 0);
+        ctx.lineTo(8 - legFlex, 16);
+        ctx.lineTo(5, 24);
+        ctx.stroke();
+
+        // White Gloves / Shoes
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(-5, 24, 5, 0, Math.PI * 2);
+        ctx.arc(5, 24, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    }
+}
+
+// Particle System for Ink Effects
+const particles = [];
+function createInkSplash(x, y) {
+    for (let i = 0; i < 8; i++) {
+        particles.push({
+            x: x,
+            y: y,
+            vx: (Math.random() - 0.5) * 6,
+            vy: (Math.random() - 0.5) * 6,
+            size: Math.random() * 5 + 2,
+            life: 20
+        });
+    }
+}
+
+function updateParticles() {
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.life--;
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+}
+
+function drawParticles() {
+    ctx.fillStyle = '#111';
+    for (let p of particles) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// Instantiate Player
+const player = new Player();
+
+// Main Game Loop
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 1. Render Background Artwork
+    if (bgImage.complete && bgImage.naturalWidth !== 0) {
+        ctx.drawImage(bgImage, 0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.fillStyle = '#333';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // 2. Render Platforms
+    ctx.fillStyle = 'rgba(20, 20, 20, 0.4)';
+    for (let plat of platforms) {
+        ctx.fillRect(plat.x, plat.y, plat.w, plat.h);
+    }
+
+    // 3. Update & Draw Collectibles
+    collectibles.forEach((item) => {
+        if (!item.collected) {
+            let floatY = item.y + Math.sin(Date.now() / 200) * 4;
+            
+            ctx.fillStyle = '#fff8dc';
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+            ctx.fillRect(item.x, floatY, 16, 20);
+            ctx.strokeRect(item.x, floatY, 16, 20);
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(item.x + 3, floatY + 4, 10, 2);
+            ctx.fillRect(item.x + 3, floatY + 8, 10, 1);
+            ctx.fillRect(item.x + 3, floatY + 11, 10, 1);
+
+            if (player.x < item.x + 16 && player.x + player.w > item.x &&
+                player.y < floatY + 20 && player.y + player.h > floatY) {
+                item.collected = true;
+                gameState.pagesCollected++;
+                document.getElementById('pages').innerText = gameState.pagesCollected;
+                createInkSplash(item.x + 8, floatY + 10);
+
+                if (gameState.pagesCollected === gameState.totalPages) {
+                    setTimeout(() => {
+                        alert("EXTRA! EXTRA! You collected all ordnance blueprints and saved Inkwell City!");
+                    }, 100);
+                }
+            }
+        }
+    });
+
+    // 4. Update Game Objects
+    player.update();
+    updateParticles();
+
+    // 5. Draw Game Objects
+    drawParticles();
+    player.draw();
+
+    requestAnimationFrame(gameLoop);
+}
+
+// Start Game Loop
+gameLoop();
+</script>
+</body>
+</html>
